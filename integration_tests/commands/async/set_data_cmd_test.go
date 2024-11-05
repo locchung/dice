@@ -5,12 +5,12 @@ import (
 	"testing"
 	"time"
 
-	"gotest.tools/v3/assert"
+	"github.com/stretchr/testify/assert"
 )
 
 func CustomDeepEqual(t *testing.T, a, b interface{}) {
 	if a == nil || b == nil {
-		assert.DeepEqual(t, a, b)
+		assert.Equal(t, a, b)
 	}
 
 	switch a.(type) {
@@ -23,7 +23,7 @@ func CustomDeepEqual(t *testing.T, a, b interface{}) {
 		})
 	}
 
-	assert.DeepEqual(t, a, b)
+	assert.Equal(t, a, b)
 }
 func TestSetDataCommand(t *testing.T) {
 	conn := getLocalConnection()
@@ -59,7 +59,7 @@ func TestSetDataCommand(t *testing.T) {
 			delay:      []time.Duration{0, 0, 0},
 		},
 		{
-			name:       "SADD Wrong Key Valye Type",
+			name:       "SADD Wrong Key Value Type",
 			cmd:        []string{"SET foo bar", "SADD foo baz"},
 			expected:   []interface{}{"OK", "WRONGTYPE Operation against a key holding the wrong kind of value"},
 			assertType: []string{"equal", "equal"},
@@ -231,7 +231,7 @@ func TestSetDataCommand(t *testing.T) {
 				if tc.assertType[i] == "equal" {
 					CustomDeepEqual(t, result, tc.expected[i])
 				} else if tc.assertType[i] == "assert" {
-					assert.Assert(t, result.(int64) <= tc.expected[i].(int64), "Expected %v to be less than or equal to %v", result, tc.expected[i])
+					assert.True(t, result.(int64) <= tc.expected[i].(int64), "Expected %v to be less than or equal to %v", result, tc.expected[i])
 				}
 			}
 		})

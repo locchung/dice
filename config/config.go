@@ -15,6 +15,8 @@ import (
 )
 
 const (
+	DiceDBVersion string = "0.0.5"
+
 	DefaultHost           string = "0.0.0.0"
 	DefaultPort           int    = 7379
 	DefaultConfigName     string = "dice.toml"
@@ -36,8 +38,9 @@ var (
 	EnableHTTP           = true
 	HTTPPort             = 8082
 
-	EnableWebsocket = true
-	WebsocketPort   = 8379
+	EnableWebsocket     = true
+	WebsocketPort       = 8379
+	NumShards       int = -1
 
 	// if RequirePass is set to an empty string, no authentication is required
 	RequirePass = utils.EmptyStr
@@ -48,88 +51,158 @@ var (
 	InitConfigCmd = false
 
 	KeysLimit = DefaultKeysLimit
+
+	EnableProfiling = false
+
+	EnableWatch = true
 )
 
 type Config struct {
-	Server struct {
-		Addr                   string        `mapstructure:"addr"`
-		Port                   int           `mapstructure:"port"`
-		KeepAlive              int32         `mapstructure:"keepalive"`
-		Timeout                int32         `mapstructure:"timeout"`
-		MaxConn                int32         `mapstructure:"max-conn"`
+	Version     string `mapstructure:"version"`
+	InstanceID  string `mapstructure:"instance_id"`
+	AsyncServer struct {
+		Addr      string `mapstructure:"addr"`
+		Port      int    `mapstructure:"port"`
+		KeepAlive int32  `mapstructure:"keepalive"`
+		Timeout   int32  `mapstructure:"timeout"`
+		MaxConn   int32  `mapstructure:"max-conn"`
+	} `mapstructure:"asyncserver"`
+
+	HTTP struct {
+		Enabled bool `mapstructure:"enabled"`
+		Port    int  `mapstructure:"port"`
+	} `mapstructure:"http"`
+
+	WebSocket struct {
+		Enabled                 bool          `mapstructure:"enabled"`
+		Port                    int           `mapstructure:"port"`
+		MaxWriteResponseRetries int           `mapstructure:"maxwriteresponseretries"`
+		WriteResponseTimeout    time.Duration `mapstructure:"writeresponsetimeout"`
+	} `mapstructure:"websocket"`
+
+	Performance struct {
+		WatchChanBufSize       int           `mapstructure:"watchchanbufsize"`
 		ShardCronFrequency     time.Duration `mapstructure:"shardcronfrequency"`
 		MultiplexerPollTimeout time.Duration `mapstructure:"servermultiplexerpolltimeout"`
 		MaxClients             int32         `mapstructure:"maxclients"`
-		MaxMemory              int64         `mapstructure:"maxmemory"`
-		EvictionPolicy         string        `mapstructure:"evictionpolicy"`
-		EvictionRatio          float64       `mapstructure:"evictionratio"`
-		KeysLimit              int           `mapstructure:"keyslimit"`
-		AOFFile                string        `mapstructure:"aoffile"`
-		WriteAOFOnCleanup      bool          `mapstructure:"writeaofoncleanup"`
-		LFULogFactor           int           `mapstructure:"lfulogfactor"`
-		LogLevel               string        `mapstructure:"loglevel"`
-		PrettyPrintLogs        bool          `mapstructure:"prettyprintlogs"`
 		EnableMultiThreading   bool          `mapstructure:"enablemultithreading"`
 		StoreMapInitSize       int           `mapstructure:"storemapinitsize"`
-		WatchChanBufSize       int           `mapstructure:"watchchanbufsize"`
 		AdhocReqChanBufSize    int           `mapstructure:"adhocreqchanbufsize"`
-	} `mapstructure:"server"`
+		EnableProfiling        bool          `mapstructure:"profiling"`
+	} `mapstructure:"performance"`
+
+	Memory struct {
+		MaxMemory      int64   `mapstructure:"maxmemory"`
+		EvictionPolicy string  `mapstructure:"evictionpolicy"`
+		EvictionRatio  float64 `mapstructure:"evictionratio"`
+		KeysLimit      int     `mapstructure:"keyslimit"`
+		LFULogFactor   int     `mapstructure:"lfulogfactor"`
+	} `mapstructure:"memory"`
+
+	Persistence struct {
+		AOFFile            string `mapstructure:"aoffile"`
+		PersistenceEnabled bool   `mapstructure:"persistenceenabled"`
+		WriteAOFOnCleanup  bool   `mapstructure:"writeaofoncleanup"`
+	} `mapstructure:"persistence"`
+
+	Logging struct {
+		LogLevel        string `mapstructure:"loglevel"`
+		PrettyPrintLogs bool   `mapstructure:"prettyprintlogs"`
+	} `mapstructure:"logging"`
+
 	Auth struct {
 		UserName string `mapstructure:"username"`
 		Password string `mapstructure:"password"`
 	} `mapstructure:"auth"`
+
 	Network struct {
 		IOBufferLength    int `mapstructure:"iobufferlength"`
 		IOBufferLengthMAX int `mapstructure:"iobufferlengthmax"`
 	} `mapstructure:"network"`
+
+	NumShards int `mapstructure:"num_shards"`
 }
 
 // Default configurations for internal use
 var baseConfig = Config{
-	Server: struct {
-		Addr                   string        `mapstructure:"addr"`
-		Port                   int           `mapstructure:"port"`
-		KeepAlive              int32         `mapstructure:"keepalive"`
-		Timeout                int32         `mapstructure:"timeout"`
-		MaxConn                int32         `mapstructure:"max-conn"`
+	Version: DiceDBVersion,
+	AsyncServer: struct {
+		Addr      string `mapstructure:"addr"`
+		Port      int    `mapstructure:"port"`
+		KeepAlive int32  `mapstructure:"keepalive"`
+		Timeout   int32  `mapstructure:"timeout"`
+		MaxConn   int32  `mapstructure:"max-conn"`
+	}{
+		Addr:      DefaultHost,
+		Port:      DefaultPort,
+		KeepAlive: int32(300),
+		Timeout:   int32(300),
+		MaxConn:   int32(0),
+	},
+	HTTP: struct {
+		Enabled bool `mapstructure:"enabled"`
+		Port    int  `mapstructure:"port"`
+	}{
+		Enabled: EnableHTTP,
+		Port:    HTTPPort,
+	},
+	WebSocket: struct {
+		Enabled                 bool          `mapstructure:"enabled"`
+		Port                    int           `mapstructure:"port"`
+		MaxWriteResponseRetries int           `mapstructure:"maxwriteresponseretries"`
+		WriteResponseTimeout    time.Duration `mapstructure:"writeresponsetimeout"`
+	}{
+		Enabled:                 EnableWebsocket,
+		Port:                    WebsocketPort,
+		MaxWriteResponseRetries: 3,
+		WriteResponseTimeout:    10 * time.Second,
+	},
+	Performance: struct {
+		WatchChanBufSize       int           `mapstructure:"watchchanbufsize"`
 		ShardCronFrequency     time.Duration `mapstructure:"shardcronfrequency"`
 		MultiplexerPollTimeout time.Duration `mapstructure:"servermultiplexerpolltimeout"`
 		MaxClients             int32         `mapstructure:"maxclients"`
-		MaxMemory              int64         `mapstructure:"maxmemory"`
-		EvictionPolicy         string        `mapstructure:"evictionpolicy"`
-		EvictionRatio          float64       `mapstructure:"evictionratio"`
-		KeysLimit              int           `mapstructure:"keyslimit"`
-		AOFFile                string        `mapstructure:"aoffile"`
-		WriteAOFOnCleanup      bool          `mapstructure:"writeaofoncleanup"`
-		LFULogFactor           int           `mapstructure:"lfulogfactor"`
-		LogLevel               string        `mapstructure:"loglevel"`
-		PrettyPrintLogs        bool          `mapstructure:"prettyprintlogs"`
 		EnableMultiThreading   bool          `mapstructure:"enablemultithreading"`
 		StoreMapInitSize       int           `mapstructure:"storemapinitsize"`
-		WatchChanBufSize       int           `mapstructure:"watchchanbufsize"`
 		AdhocReqChanBufSize    int           `mapstructure:"adhocreqchanbufsize"`
+		EnableProfiling        bool          `mapstructure:"profiling"`
 	}{
-		Addr:                   DefaultHost,
-		Port:                   DefaultPort,
-		KeepAlive:              int32(300),
-		Timeout:                int32(300),
-		MaxConn:                int32(0),
-		ShardCronFrequency:     30 * time.Second,
+		WatchChanBufSize:       20000,
+		ShardCronFrequency:     1 * time.Second,
 		MultiplexerPollTimeout: 100 * time.Millisecond,
 		MaxClients:             int32(20000),
-		MaxMemory:              0,
-		EvictionPolicy:         EvictAllKeysLFU,
-		EvictionRatio:          0.9,
-		KeysLimit:              DefaultKeysLimit,
-		AOFFile:                "./dice-master.aof",
-		WriteAOFOnCleanup:      false,
-		LFULogFactor:           10,
-		LogLevel:               "info",
-		PrettyPrintLogs:        false,
 		EnableMultiThreading:   false,
 		StoreMapInitSize:       1024000,
-		WatchChanBufSize:       20000,
 		AdhocReqChanBufSize:    20, // assuming we wouldn't have more than 20 adhoc requests being sent at a time.
+	},
+	Memory: struct {
+		MaxMemory      int64   `mapstructure:"maxmemory"`
+		EvictionPolicy string  `mapstructure:"evictionpolicy"`
+		EvictionRatio  float64 `mapstructure:"evictionratio"`
+		KeysLimit      int     `mapstructure:"keyslimit"`
+		LFULogFactor   int     `mapstructure:"lfulogfactor"`
+	}{
+		MaxMemory:      0,
+		EvictionPolicy: EvictAllKeysLFU,
+		EvictionRatio:  0.9,
+		KeysLimit:      DefaultKeysLimit,
+		LFULogFactor:   10,
+	},
+	Persistence: struct {
+		AOFFile            string `mapstructure:"aoffile"`
+		PersistenceEnabled bool   `mapstructure:"persistenceenabled"`
+		WriteAOFOnCleanup  bool   `mapstructure:"writeaofoncleanup"`
+	}{
+		PersistenceEnabled: true,
+		AOFFile:            "./dice-master.aof",
+		WriteAOFOnCleanup:  false,
+	},
+	Logging: struct {
+		LogLevel        string `mapstructure:"loglevel"`
+		PrettyPrintLogs bool   `mapstructure:"prettyprintlogs"`
+	}{
+		LogLevel:        "info",
+		PrettyPrintLogs: true,
 	},
 	Auth: struct {
 		UserName string `mapstructure:"username"`
@@ -151,17 +224,8 @@ var defaultConfig Config
 
 func init() {
 	config := baseConfig
-	env := os.Getenv("DICE_ENV")
-	switch env {
-	case "dev":
-		config.Server.LogLevel = "debug"
-		config.Server.PrettyPrintLogs = true
-	default:
-	}
-	logLevel := os.Getenv("DICE_LOG_LEVEL")
-	if logLevel != "" {
-		config.Server.LogLevel = logLevel
-	}
+	config.Logging.PrettyPrintLogs = false
+	config.Logging.LogLevel = "info"
 	defaultConfig = config
 }
 
@@ -210,7 +274,7 @@ func createConfigFile(configFilePath string) {
 	}
 
 	setUpViperConfig(configFilePath)
-	slog.Info("config file created at %s with default configurations", slog.Any("path", configFilePath))
+	slog.Info("config file created at", slog.Any("path", configFilePath))
 }
 
 func writeConfigFile(configFilePath string) error {
@@ -219,7 +283,7 @@ func writeConfigFile(configFilePath string) error {
 		return err
 	}
 
-	slog.Info("creating default config file at %s", slog.Any("path", configFilePath))
+	slog.Info("creating default config file at", slog.Any("path", configFilePath))
 	file, err := os.Create(configFilePath)
 	if err != nil {
 		return err
@@ -232,10 +296,6 @@ func writeConfigFile(configFilePath string) error {
 }
 
 func isValidDirPath() bool {
-	if CustomConfigFilePath == utils.EmptyStr {
-		return false
-	}
-
 	info, err := os.Stat(CustomConfigFilePath)
 	if os.IsNotExist(err) || err != nil {
 		return false
@@ -253,7 +313,6 @@ func areBothFlagsSet() bool {
 }
 
 func setUpViperConfig(configFilePath string) {
-	// if configFilepath has config file then that file name will be viper.SetConfigName
 	if configFilePath != filepath.Join(DefaultConfigFilePath, DefaultConfigName) {
 		viper.SetConfigName(strings.Split(filepath.Base(configFilePath), ".")[0])
 	} else {
@@ -284,8 +343,6 @@ func setUpViperConfig(configFilePath string) {
 
 	// override default configurations with command line flags
 	mergeFlagsWithConfig()
-
-	slog.Info("configurations loaded successfully.")
 }
 
 func mergeFlagsWithConfig() {
@@ -294,26 +351,27 @@ func mergeFlagsWithConfig() {
 	}
 
 	if Host != DefaultHost {
-		DiceConfig.Server.Addr = Host
+		DiceConfig.AsyncServer.Addr = Host
 	}
 
 	if Port != DefaultPort {
-		DiceConfig.Server.Port = Port
+		DiceConfig.AsyncServer.Port = Port
 	}
 
 	if KeysLimit != DefaultKeysLimit {
-		DiceConfig.Server.KeysLimit = KeysLimit
+		DiceConfig.Memory.KeysLimit = KeysLimit
 	}
 }
 
-// This function checks if the config file is present or not at ConfigFileLocation
+// This function checks if the config file is present or not at default location or at -c flag location
 func isConfigFilePresent() bool {
-	// If config file present in current directory use it
-	if _, err := os.Stat(filepath.Join(".", DefaultConfigName)); err == nil {
+	// If -c flag is not set then look for config file in current directory use it
+	if _, err := os.Stat(filepath.Join(".", DefaultConfigName)); FileLocation == utils.EmptyStr && err == nil {
 		FileLocation = filepath.Join(".", DefaultConfigName)
 		return true
 	}
 
+	// will be executed if -c flag is used
 	_, err := os.Stat(FileLocation)
 
 	return err == nil

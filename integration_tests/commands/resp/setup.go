@@ -12,26 +12,27 @@ import (
 	"time"
 
 	"github.com/dicedb/dice/internal/server/resp"
+	"github.com/dicedb/dice/internal/watchmanager"
 	"github.com/dicedb/dice/internal/worker"
 
 	"github.com/dicedb/dice/config"
 	"github.com/dicedb/dice/internal/clientio"
 	derrors "github.com/dicedb/dice/internal/errors"
-	"github.com/dicedb/dice/internal/logger"
 	"github.com/dicedb/dice/internal/shard"
 	dstore "github.com/dicedb/dice/internal/store"
 	"github.com/dicedb/dice/testutils"
-	redis "github.com/dicedb/go-dice"
+	dicedb "github.com/dicedb/dicedb-go"
 )
 
 type TestServerOptions struct {
-	Port   int
-	Logger *slog.Logger
+	Port int
 }
 
+// getLocalConnection returns a local TCP connection to the database
+//
 //nolint:unused
 func getLocalConnection() net.Conn {
-	conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", config.DiceConfig.Server.Port))
+	conn, err := net.Dial("tcp", fmt.Sprintf("localhost:%d", config.DiceConfig.AsyncServer.Port))
 	if err != nil {
 		panic(err)
 	}
@@ -48,9 +49,9 @@ func deleteTestKeys(keysToDelete []string, store *dstore.Store) {
 }
 
 //nolint:unused
-func getLocalSdk() *redis.Client {
-	return redis.NewClient(&redis.Options{
-		Addr: fmt.Sprintf(":%d", config.DiceConfig.Server.Port),
+func getLocalSdk() *dicedb.Client {
+	return dicedb.NewClient(&dicedb.Options{
+		Addr: fmt.Sprintf(":%d", config.DiceConfig.AsyncServer.Port),
 
 		DialTimeout:           10 * time.Second,
 		ReadTimeout:           30 * time.Second,
@@ -112,26 +113,25 @@ func fireCommandAndGetRESPParser(conn net.Conn, cmd string) *clientio.RESPParser
 }
 
 func RunTestServer(wg *sync.WaitGroup, opt TestServerOptions) {
-	logr := logger.New(logger.Opts{WithTimestamp: true})
-	slog.SetDefault(logr)
 	config.DiceConfig.Network.IOBufferLength = 16
-	config.DiceConfig.Server.WriteAOFOnCleanup = false
+	config.DiceConfig.Persistence.WriteAOFOnCleanup = false
 	if opt.Port != 0 {
-		config.DiceConfig.Server.Port = opt.Port
+		config.DiceConfig.AsyncServer.Port = opt.Port
 	} else {
-		config.DiceConfig.Server.Port = 9739
+		config.DiceConfig.AsyncServer.Port = 9739
 	}
 
-	queryWatchChan := make(chan dstore.QueryWatchEvent, config.DiceConfig.Server.KeysLimit)
-	cmdWatchChan := make(chan dstore.CmdWatchEvent, config.DiceConfig.Server.KeysLimit)
+	queryWatchChan := make(chan dstore.QueryWatchEvent, config.DiceConfig.Memory.KeysLimit)
+	cmdWatchChan := make(chan dstore.CmdWatchEvent, config.DiceConfig.Memory.KeysLimit)
+	cmdWatchSubscriptionChan := make(chan watchmanager.WatchSubscription)
 	gec := make(chan error)
-	shardManager := shard.NewShardManager(1, queryWatchChan, cmdWatchChan, gec, logr)
+	shardManager := shard.NewShardManager(1, queryWatchChan, cmdWatchChan, gec)
 	workerManager := worker.NewWorkerManager(20000, shardManager)
 	// Initialize the RESP Server
-	testServer := resp.NewServer(shardManager, workerManager, cmdWatchChan, gec, logr)
+	testServer := resp.NewServer(shardManager, workerManager, cmdWatchSubscriptionChan, cmdWatchChan, gec)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	fmt.Println("Starting the test server on port", config.DiceConfig.Server.Port)
+	fmt.Println("Starting the test server on port", config.DiceConfig.AsyncServer.Port)
 
 	shardManagerCtx, cancelShardManager := context.WithCancel(ctx)
 	wg.Add(1)
@@ -149,7 +149,7 @@ func RunTestServer(wg *sync.WaitGroup, opt TestServerOptions) {
 				cancelShardManager()
 				return
 			}
-			opt.Logger.Error("Test server encountered an error", slog.Any("error", err))
+			slog.Error("Test server encountered an error", slog.Any("error", err))
 			os.Exit(1)
 		}
 	}()

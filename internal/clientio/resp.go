@@ -58,7 +58,7 @@ func readStringUntilSr(buf *bytes.Buffer) (string, error) {
 	if err != nil {
 		return utils.EmptyStr, err
 	}
-	// increamenting to skip `\n`
+	// incrementing to skip `\n`
 	if _, err := buf.ReadByte(); err != nil {
 		return utils.EmptyStr, err
 	}
@@ -82,7 +82,7 @@ func readError(buf *bytes.Buffer) (string, error) {
 }
 
 // reads a RESP encoded integer from data and returns
-// the intger value and the error
+// the integer value and the error
 // the function internally manipulates the buffer pointer
 // and keepts it at a point where the subsequent value can be read from.
 func readInt64(buf *bytes.Buffer) (int64, error) {
@@ -242,6 +242,14 @@ func Encode(value interface{}, isSimple bool) []byte {
 		buf := bytes.NewBuffer(b) // Create a buffer for accumulating encoded values.
 		for _, b := range value.([]int64) {
 			buf.Write(Encode(b, false)) // Encode each int64 and write to the buffer.
+		}
+		return []byte(fmt.Sprintf("*%d\r\n%s", len(v), buf.Bytes())) // Return the encoded response.
+
+	case []uint64:
+		var b []byte
+		buf := bytes.NewBuffer(b) // Create a buffer for accumulating encoded values.
+		for _, b := range value.([]uint64) {
+			buf.Write(Encode(b, false)) // Encode each uint64 and write to the buffer.
 		}
 		return []byte(fmt.Sprintf("*%d\r\n%s", len(v), buf.Bytes())) // Return the encoded response.
 
